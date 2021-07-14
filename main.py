@@ -6,6 +6,7 @@ import os
 import re
 import logging
 import traceback
+import socks
 from getpass import getpass
 from email import encoders
 from email.mime.base import MIMEBase
@@ -14,12 +15,21 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.header import Header
 
+# ENCODING      = 'ISO-8859-1'
+ENCODING      = 'utf-8'
+CSV_DELIMITER = '\t'
+
+# MAIL_HOST = 'smtp.gmail.com:587'
 MAIL_HOST = "mail.pku.edu.cn"
 ME        = "chengke<chengke@pku.edu.cn>"
 SENDER    = 'chengke@pku.edu.cn'
+
 DATA_FILE = 'a.csv'
 MAIL_FILE = 'document.html'
 SUBJECT   = 'Test Document'
+
+# socks.setdefaultproxy(socks.SOCKS5, '127.0.0.1', 7890)
+# socks.wrapmodule(smtplib)
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -46,12 +56,13 @@ class MailContent:
         self.root = MIMEMultipart('related')
         self.root['From']     = from_
         self.root['To']       = to
-        self.root['Subject']  = Header(subject, 'utf-8')
+        self.root['Subject']  = Header(subject, ENCODING)
 
         self.alt = MIMEMultipart('alternative')
         self.root.attach(self.alt)
 
-        self.body = MIMEText(render_content(body, fields), 'html', 'utf-8')
+        content = render_content(body, fields)
+        self.body = MIMEText(content, 'html', ENCODING)
         self.alt.attach(self.body) 
 
         self.img_id = 0
@@ -82,6 +93,8 @@ class Mailer:
 
     def __enter__(self):
         self.server.connect(self.host)
+        self.server.ehlo()
+        self.server.starttls()
         passwd = getpass()
         self.server.login(self.user, passwd)
         return self
@@ -96,19 +109,20 @@ class Mailer:
         self.server.sendmail(from_, to, content.as_string())
 
 
-def start_sending_email(mailer: Mailer, mailfile, datafile, from_, subject):
-    with open(datafile) as csvfile:
-        reader = csv.DictReader(csvfile)
+def start_sending_email(mailer: Mailer, mailfile, datafile, from_):
+    with open(datafile, encoding=ENCODING) as csvfile:
+        reader = csv.DictReader(csvfile, delimiter=CSV_DELIMITER)
         for fields in reader:
             logging.info('try: ' + str(fields))
-            to = fields['邮箱']
+            to = fields['emails']
+            subject = f'[{ fields["acronym"] }] Problem with #{ fields["ID"] }: { fields["title"] }'
             mail_content = MailContent(mailfile, fields, from_, to, subject)
-            mailer.send(from_, to, mail_content)
-            logging.info('success: ' + to)
-
+            
+            mailer.send(from_, to.split(';'), mail_content)
+            logging.info(f'success: {to}')
 
 if __name__ == "__main__":
     with Mailer(MAIL_HOST, SENDER) as mailer:
-        start_sending_email(mailer, MAIL_FILE, DATA_FILE, ME, SUBJECT)
+        start_sending_email(mailer, MAIL_FILE, DATA_FILE, ME)
 
 
